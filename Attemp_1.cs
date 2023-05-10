@@ -9,6 +9,8 @@ using System.IO;
 using Newtonsoft.Json;
 using System;
 using System.Linq;
+using Firebase.Database;
+
 
 public class Attemp_1 : MonoBehaviour
 {
@@ -27,6 +29,8 @@ public class Attemp_1 : MonoBehaviour
 
     //the current pattern name/identifier of the program.
     public string CurrentIdentifier;
+
+    public static DatabaseReference Ref;
 
     //Indexes of each finger.
     const int THUMB = 0;
@@ -49,6 +53,8 @@ public class Attemp_1 : MonoBehaviour
 
         // instantizes a new DatasetManager object.
         DSM = new DatasetManager(DatasetFilePath);
+
+        Ref = FirebaseDatabase.DefaultInstance.RootReference;
     }
 
     //The "Update" function is called once every frame, simmilar to a game loop in other languages.
@@ -68,7 +74,13 @@ public class Attemp_1 : MonoBehaviour
         {
             PrintFingerCurls();
             DSM.SaveDataset(new DatasetEntry(FingerCurls, CurrentIdentifier));       
-            Debug.Log(DSM.DataEntryClassGuess(FingerCurls, 1));
+        }
+
+        //Guesses the class of the current finger curls.
+        if (Input.GetKeyDown(KeyCode.A))
+        {
+            PrintFingerCurls();
+            Debug.Log(DSM.DataEntryClassGuess(FingerCurls, 3));
         }
     }
 
@@ -95,8 +107,7 @@ public class Attemp_1 : MonoBehaviour
             this.DatasetFilePath = _DatasetFilePath;
 
             //Put the Current training file to the DatasetEntries dict that was just created.
-            string JsonFile = File.ReadAllText(_DatasetFilePath);
-            DatasetEntries = JsonConvert.DeserializeObject<List<DatasetEntry>>(JsonFile) ?? new List<DatasetEntry>();
+            RetriveJsonToDatasetEntries();
         }
 
         /// <summary>
@@ -111,13 +122,15 @@ public class Attemp_1 : MonoBehaviour
             string JsonFile = File.ReadAllText(DatasetFilePath);
 
             //Retrive the Current file save and put it in the DatasetEntries list (Overcomes the overwriting all datasnapshots bug).
-            DatasetEntries = JsonConvert.DeserializeObject<List<DatasetEntry>>(JsonFile) == null ? new List<DatasetEntry>() : JsonConvert.DeserializeObject<List<DatasetEntry>>(JsonFile);
+            RetriveJsonToDatasetEntries();
 
             //Adds the Current DatasetEntry to the DatasetEntries list.
             DatasetEntries.Add(TempSave);
 
             //Overwrites the current file with the new list.
             File.WriteAllText(DatasetFilePath, JsonConvert.SerializeObject(DatasetEntries, Formatting.Indented));
+
+            Ref.Child("test").SetRawJsonValueAsync(JsonConvert.SerializeObject(DatasetEntries, Formatting.Indented));
         }
 
         //Try1 of pattern Recognition using the KNN algorithm
@@ -125,7 +138,7 @@ public class Attemp_1 : MonoBehaviour
         {
             //create a list to store tuples, each containg a DatasetEntry object and the "distance" of the Entry to the unclassified curls.
             List<Tuple<DatasetEntry, float>> Distances = new List<Tuple<DatasetEntry, float>>();
-
+            RetriveJsonToDatasetEntries();
             //Loops over all the DatasetEntry objects in the File/DatasetEntries list.
             foreach (DatasetEntry Entry in DatasetEntries)
             {
@@ -147,7 +160,7 @@ public class Attemp_1 : MonoBehaviour
 
             //sort the Distances list by distance value asending.
             Distances.Sort((x, y) => x.Item2.CompareTo(y.Item2));
-
+            Debug.Log(Distances[0].Item1.Identifier + " " + Distances[0].Item2);
             //Create a dictionary containg a string (Pattern class) as its key and an int (counter) as its value.
             Dictionary<string, int> PatternNamesAndCounter = new Dictionary<string, int>();
 
@@ -166,12 +179,38 @@ public class Attemp_1 : MonoBehaviour
                     PatternNamesAndCounter.Add(Distances[i].Item1.Identifier, 1);
                 }                
             }
-            string ClassGuess = PatternNamesAndCounter.FirstOrDefault(x => x.Value == PatternNamesAndCounter.Values.Max()).Key;
-            //add here saving the Entry with the New class.
 
+            //The most frequant class in the k nearest entries to the sample.
+            string ClassGuess = PatternNamesAndCounter.OrderByDescending(x => x.Value).First().Key;
+
+            //the following code Calculates the error[%] of the class guess.
+            float TempSum = 0;
+            int Cnt = 0;
+            for(int i = 0; i < K; i++)
+            {
+                if (Distances[i].Item1.Identifier == ClassGuess)
+                {
+                    TempSum += Distances[i].Item2;
+                    Cnt++;
+                }
+            }
+            float AvgD = TempSum / Cnt;
+            float Acc =  100f - (AvgD * 20f);
+            Debug.Log(AvgD);
+            Debug.Log("accuracy:" + Acc + "%");
             //return the class that was most common from the K nearest neighbors to the unclassed entrty.
             //that class has a decent chance of being the currect class.
             return ClassGuess;
+        }
+
+
+        /// <summary>
+        /// //Retrive the Current file save and put it in the DatasetEntries list (Overcomes the overwriting all datasnapshots bug).
+        /// </summary>
+        public void RetriveJsonToDatasetEntries()
+        {
+            string JsonFile = File.ReadAllText(DatasetFilePath);
+            DatasetEntries = JsonConvert.DeserializeObject<List<DatasetEntry>>(JsonFile) ?? new List<DatasetEntry>();
         }
     }
 
@@ -196,16 +235,20 @@ public class Attemp_1 : MonoBehaviour
             this.Identifier = _Identifier;
         }
     }
+
   
     /// <summary>
     /// Prints the current curl value of each finger in the debug log.
     /// </summary>
     public void PrintFingerCurls()
     {
+        float PolynomialRepresentation = 0;
         //outputs each finger's name and Current Curl value [0,1].
         for (int i = 0; i < FingerCurls.Length; i++)
         {
             Debug.Log(FingerNames[i] + " " + FingerCurls[i]);
+            PolynomialRepresentation += FingerCurls[i] * Mathf.Pow(10, i);
         }
+        Debug.Log("Poly Rep: " + PolynomialRepresentation);
     }
 }
